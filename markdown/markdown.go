@@ -12,7 +12,7 @@ import (
 )
 
 type folderInfo struct {
-	Name   string `json:"name"`
+	Path   string `json:"path"`
 	Matter matter `json:"matter"`
 }
 
@@ -49,7 +49,7 @@ func FindFolderList(path string) ([]folderInfo, error) {
 
 			// Add the folder information to the list
 			folders = append(folders, folderInfo{
-				Name:   filePath,
+				Path:   info.Name(),
 				Matter: matter,
 			})
 			return filepath.SkipDir

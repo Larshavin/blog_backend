@@ -11,12 +11,38 @@ import (
 
 func main() {
 	r := gin.Default()
-
+	r.Use(CORSMiddleware())
 	r.Static("/image", "/home/syyang/blog_data")
 	r.Static("/markdown", "/home/syyang/blog_data")
 	r.GET("/posts/:number", blogPostsHandler())
 
 	r.Run("192.168.15.246:8080") // listen and serve on 0.0.0.0:8080 (for windows "localhost:8080")
+}
+
+func CORSMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+
+		allowUrlList := []string{"http://192.168.15.248:5174", "https://kubesy.com", "http://localhost:5174"}
+		var allowUrl string
+		for _, url := range allowUrlList {
+			if c.Request.Header.Get("Origin") == url {
+				allowUrl = url
+				break
+			}
+		}
+
+		// c.Header("Access-Control-Allow-Headers", "Content-Type, Authorization, Origin")
+		// c.Header("Access-Control-Allow-Credentials", "true")
+		c.Header("Access-Control-Allow-Origin", allowUrl)
+		c.Header("Access-Control-Allow-Methods", "GET, DELETE, POST")
+
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(204)
+			return
+		}
+
+		c.Next()
+	}
 }
 
 func blogPostsHandler() gin.HandlerFunc {
