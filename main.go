@@ -9,6 +9,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+var (
+	SSLCRT string = "/etc/letsencrypt/live/3trolls.me/fullchain.pem"
+	SSLKEY string = "/etc/letsencrypt/live/3trolls.me/privkey.pem"
+)
+
 func main() {
 	r := gin.Default()
 	r.Use(CORSMiddleware())
@@ -16,7 +21,8 @@ func main() {
 	r.Static("/markdown", "/home/syyang/blog_data")
 	r.GET("/posts/:number", blogPostsHandler())
 
-	r.Run("192.168.15.246:8080") // listen and serve on 0.0.0.0:8080 (for windows "localhost:8080")
+	// r.Run("192.168.15.246:8080") // listen and serve on 0.0.0.0:8080 (for windows "localhost:8080")
+	r.RunTLS(":443", SSLCRT, SSLKEY)
 }
 
 func CORSMiddleware() gin.HandlerFunc {
