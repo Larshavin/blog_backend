@@ -19,7 +19,7 @@ func main() {
 	r.Use(CORSMiddleware())
 	r.Static("/image", "/home/syyang/blog_data")
 	r.Static("/markdown", "/home/syyang/blog_data")
-	r.GET("/posts/:number", blogPostsHandler())
+	r.GET("/posts/:number/:rows", blogPostsHandler())
 
 	// r.Run("192.168.15.246:8080") // listen and serve on 0.0.0.0:8080 (for windows "localhost:8080")
 	r.RunTLS(":443", SSLCRT, SSLKEY)
@@ -28,7 +28,7 @@ func main() {
 func CORSMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 
-		allowUrlList := []string{"http://192.168.15.248:5174", "https://kubesy.com", "http://localhost:5174"}
+		allowUrlList := []string{"http://192.168.15.248:5174", "http://192.168.15.253:5174", "https://kubesy.com", "http://localhost:5174"}
 		var allowUrl string
 		for _, url := range allowUrlList {
 			if c.Request.Header.Get("Origin") == url {
@@ -54,6 +54,11 @@ func CORSMiddleware() gin.HandlerFunc {
 func blogPostsHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 
+		rows, err := strconv.Atoi(c.Params.ByName("rows"))
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+
 		number := c.Params.ByName("number")
 		paginatorNumber, err := strconv.Atoi(number)
 		if err != nil {
@@ -66,14 +71,14 @@ func blogPostsHandler() gin.HandlerFunc {
 		}
 
 		length := len(folders)
-		fmt.Println(length / 10)
+		fmt.Println(length / rows)
 
-		if paginatorNumber-1 > length/10 {
+		if paginatorNumber-1 > length/rows {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Paginator number is too big"})
-		} else if paginatorNumber*10 > length {
-			c.JSON(http.StatusOK, folders[(paginatorNumber-1)*10:])
+		} else if paginatorNumber*rows > length {
+			c.JSON(http.StatusOK, gin.H{"posts": folders[(paginatorNumber-1)*rows:], "length": length})
 		} else {
-			c.JSON(http.StatusOK, folders[(paginatorNumber-1)*10:paginatorNumber*10])
+			c.JSON(http.StatusOK, gin.H{"posts": folders[(paginatorNumber-1)*rows : paginatorNumber*rows], "length": length})
 		}
 	}
 }
