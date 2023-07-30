@@ -20,6 +20,7 @@ func main() {
 	r.Static("/image", "/home/syyang/blog_data")
 	r.Static("/markdown", "/home/syyang/blog_data")
 	r.GET("/posts/:number/:rows", blogPostsHandler())
+	r.GET("/post/:path/:rows", blogPostHandler())
 
 	// r.Run("192.168.15.246:8080") // listen and serve on 0.0.0.0:8080 (for windows "localhost:8080")
 	r.RunTLS(":443", SSLCRT, SSLKEY)
@@ -79,6 +80,50 @@ func blogPostsHandler() gin.HandlerFunc {
 			c.JSON(http.StatusOK, gin.H{"posts": folders[(paginatorNumber-1)*rows:], "length": length})
 		} else {
 			c.JSON(http.StatusOK, gin.H{"posts": folders[(paginatorNumber-1)*rows : paginatorNumber*rows], "length": length})
+		}
+	}
+}
+
+type post struct {
+	Title           string `json:"title"`
+	PaginatorNumber int    `json:"number"`
+}
+
+func blogPostHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		rows, err := strconv.Atoi(c.Params.ByName("rows"))
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		path := c.Params.ByName("path")
+
+		folders, err := markdown.FindFolderList("/home/syyang/blog_data")
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		length := len(folders)
+		for i, folder := range folders {
+			if folder.Path == path {
+				var prev, next post
+				if i == 0 {
+					prev.Title = ""
+					prev.PaginatorNumber = 0
+					next.Title = folders[i+1].Path
+					next.PaginatorNumber = (i + 1) / rows
+				} else if i == len(folders)-1 {
+					prev.Title = folders[i-1].Path
+					prev.PaginatorNumber = (i - 1) / rows
+					next.Title = ""
+					next.PaginatorNumber = length / rows
+				} else {
+					prev.Title = folders[i-1].Path
+					prev.PaginatorNumber = (i - 1) / rows
+					next.Title = folders[i+1].Path
+					next.PaginatorNumber = (i + 1) / rows
+				}
+				c.JSON(http.StatusOK, gin.H{"number": i / rows, "prev": prev, "next": next})
+				return
+			}
 		}
 	}
 }
