@@ -17,10 +17,12 @@ var (
 func main() {
 	r := gin.Default()
 	r.Use(CORSMiddleware())
-	r.Static("/image", "/home/syyang/blog_data")
-	r.Static("/markdown", "/home/syyang/blog_data")
-	r.GET("/posts/:number/:rows", blogPostsHandler())
-	r.GET("/post/:path/:rows", blogPostHandler())
+
+	group := r.Group("/syyang")
+	group.Static("/image", "/home/syyang/blog_data")
+	group.Static("/markdown", "/home/syyang/blog_data")
+	group.GET("/posts/:number/:rows", blogPostsHandler())
+	group.GET("/post/:path/:rows", blogPostHandler())
 
 	// r.Run("192.168.15.246:8080") // listen and serve on 0.0.0.0:8080 (for windows "localhost:8080")
 	r.RunTLS(":443", SSLCRT, SSLKEY)
