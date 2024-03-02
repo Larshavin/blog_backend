@@ -72,7 +72,7 @@ func blogPostsHandler() gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		}
 
-		folders, err := markdown.FindFolderList("/home/syyang/blog_data")
+		folders, err := markdown.FindFolderList("/blog_data")
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		}
