@@ -1,6 +1,7 @@
 package main
 
 import (
+	"time"
 	"blog/markdown"
 	"fmt"
 	"net/http"
@@ -9,29 +10,32 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-var (
-	SSLCRT string = "/etc/letsencrypt/live/3trolls.me/fullchain.pem"
-	SSLKEY string = "/etc/letsencrypt/live/3trolls.me/privkey.pem"
-)
+// var (
+// 	SSLCRT string = "/etc/letsencrypt/live/3trolls.me/fullchain.pem"
+// 	SSLKEY string = "/etc/letsencrypt/live/3trolls.me/privkey.pem"
+// )
 
 func main() {
 	r := gin.Default()
 	r.Use(CORSMiddleware())
 
 	group := r.Group("/syyang")
-	group.Static("/image", "/home/syyang/blog_data")
-	group.Static("/markdown", "/home/syyang/blog_data")
+	group.Static("/image", "/blog_data")
+	group.Static("/markdown", "/blog_data")
 	group.GET("/posts/:number/:rows", blogPostsHandler())
 	group.GET("/post/:path/:rows", blogPostHandler())
+	group.GET("/check", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"message": "ok", "time": time.Now().Format("2006-01-02 15:04:05")})
+	})
 
-	// r.Run("192.168.15.246:8080") // listen and serve on 0.0.0.0:8080 (for windows "localhost:8080")
-	r.RunTLS(":443", SSLCRT, SSLKEY)
+	r.Run("0.0.0.0:8080") // listen and serve on 0.0.0.0:8080 (for windows "localhost:8080")
+	// r.RunTLS(":443", SSLCRT, SSLKEY)
 }
 
 func CORSMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 
-		allowUrlList := []string{"http://192.168.15.248:5174", "http://192.168.15.253:5174", "https://kubesy.com", "http://localhost:5174"}
+		allowUrlList := []string{ "https://blog.3trolls.me", "http://localhost:5174"}
 		var allowUrl string
 		for _, url := range allowUrlList {
 			if c.Request.Header.Get("Origin") == url {
@@ -99,7 +103,10 @@ func blogPostHandler() gin.HandlerFunc {
 		}
 		path := c.Params.ByName("path")
 
-		folders, err := markdown.FindFolderList("/home/syyang/blog_data")
+		// get relative folder path that main.go is located
+		// folderPath :=  "/blog_data" 
+
+		folders, err := markdown.FindFolderList("/blog_data")
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		}
