@@ -35,7 +35,7 @@ func main() {
 func CORSMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 
-		allowUrlList := []string{ "https://blog.3trolls.me", "http://localhost:5174"}
+		allowUrlList := []string{ "https://blog.3trolls.me", "https://kubesy.com", "http://localhost:5174"}
 		var allowUrl string
 		for _, url := range allowUrlList {
 			if c.Request.Header.Get("Origin") == url {
