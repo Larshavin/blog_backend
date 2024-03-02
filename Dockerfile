@@ -7,6 +7,7 @@ ENV GO111MODULE=on \
     GOARCH=amd64
 
 WORKDIR /build
+ADD markdown ./markdown
 COPY go.mod go.sum main.go ./
 RUN go mod download
 RUN go build -o main .
