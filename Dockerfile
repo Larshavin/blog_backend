@@ -7,6 +7,7 @@ ENV GO111MODULE=on \
     GOARCH=amd64
 
 #RUN mkdir -p /blog_data
+WORKDIR /build
 COPY . .
 RUN go mod download
 RUN go build -o main .
