@@ -7,12 +7,10 @@ ENV GO111MODULE=on \
     GOARCH=amd64
 
 #RUN mkdir -p /blog_data
-WORKDIR /build
-ADD markdown ./markdown
-COPY go.mod go.sum main.go ./
+COPY . .
 RUN go mod download
 RUN go build -o main .
-#ENTRYPOINT ["./main"]
+
 WORKDIR /dist
 RUN cp /build/main .
 

@@ -31,11 +31,15 @@ func FindFolderList(path string) ([]folderInfo, error) {
 		// Check if it's a directory and not the root directory itself
 		if err == nil && info.IsDir() && filePath != path {
 
-            		 // Check if the directory name starts with a dot (hidden directory)
+			// Check if the directory name starts with a dot (hidden directory)
 			if strings.HasPrefix(info.Name(), ".") {
-                		// Skip hidden directories
-                		return filepath.SkipDir
-            		}
+				// Skip hidden directories
+				return filepath.SkipDir
+			}
+			if strings.HasPrefix(info.Name(), "test") {
+				// Skip test directories
+				return filepath.SkipDir
+			}
 
 			// Read the markdown file
 			content, err := os.ReadFile(filePath + "/" + info.Name() + ".md")
