@@ -65,7 +65,7 @@ func (c *Client) Connect(mod string) {
 	}
 
 	var url string
-	if mod == constant.DEV {
+	if mod == constant.MODE {
 		url = "https://172.30.1.154:9200/"
 	} else {
 		url = "https://quickstart-es-http.blog.svc:9200/"
