@@ -2,7 +2,9 @@ package post
 
 import (
 	constant "blog/constant"
-	elasticsearch "blog/elastic-search"
+	db "blog/database"
+	ent "blog/ent"
+
 	"fmt"
 	"net/url"
 	"os"
@@ -10,20 +12,21 @@ import (
 	"time"
 
 	"github.com/adrg/frontmatter"
+	"github.com/google/uuid"
 )
 
 type FrontData struct {
-	Title    string   `json:"title"`              // 제목
-	Date     string   `json:"date,omitempty"`     // 작성일
-	Content  string   `json:"content,omitempty"`  // 마크다운 파일 내용
-	Images   []string `json:"images,omitempty"`   // 이미지 파일 이름 리스트
-	TempPath string   `json:"tempPath,omitempty"` // 이미지 임시 저장소 경로
-	Category string   `json:"category,omitempty"` // 카테고리
-	Tag      []string `json:"tag,omitempty"`      // 태그 리스트
-	ID       string   `json:"id,omitempty"`       // 일라스틱서치에서 사용하는 ID
+	Title    string    `json:"title"`              // 제목
+	Date     string    `json:"date,omitempty"`     // 작성일
+	Content  string    `json:"content,omitempty"`  // 마크다운 파일 내용
+	Images   []string  `json:"images,omitempty"`   // 이미지 파일 이름 리스트
+	TempPath string    `json:"tempPath,omitempty"` // 이미지 임시 저장소 경로
+	Category string    `json:"category,omitempty"` // 카테고리
+	Tag      []string  `json:"tag,omitempty"`      // 태그 리스트
+	ID       uuid.UUID `json:"id,omitempty"`       // ID
 }
 
-func SavePost(frontData FrontData, elasticClient *elasticsearch.Client) error {
+func SavePost(frontData FrontData) error {
 
 	loc, err := time.LoadLocation("Asia/Seoul")
 	if err != nil {
@@ -75,17 +78,23 @@ ShowToc: true,
 
 	url := "/" + frontData.Title + "/" + frontData.Title + ".md"
 
+	// string to time.Time
+	time, err := time.Parse(time.RFC3339, frontData.Date)
+	if err != nil {
+		return err
+	}
+
 	// 3. 마크다운 파일의 메타데이터는 일라스틱서치에 저장
-	metadata := elasticsearch.Post{
+	metadata := ent.Post{
 		Title:    frontData.Title,
-		Date:     frontData.Date,
+		Date:     time,
 		Content:  url,
 		Images:   frontData.Images,
 		Category: frontData.Category,
 		Tag:      frontData.Tag,
 	}
 
-	err = elasticClient.SavePost(metadata)
+	err = db.SavePost(metadata)
 	if err != nil {
 		return err
 	}
@@ -109,13 +118,9 @@ func SaveTempImage(images []Image, path string) {
 	}
 }
 
-func GetPost(row, paginatorNumber int, elasticClient *elasticsearch.Client) ([]frontendInfo, error) {
+func GetPost(row, paginatorNumber int) ([]frontendInfo, error) {
 
-	// 일라스틱서치에서 게시글 리스트를 가져오는 함수
-
-	start := (paginatorNumber - 1) * row
-
-	list, err := elasticClient.GetPostList(start, row)
+	list, err := db.GetPostList(paginatorNumber, row)
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +133,7 @@ func GetPost(row, paginatorNumber int, elasticClient *elasticsearch.Client) ([]f
 	return frontendData, nil
 }
 
-func DeletePost(title, postID string, elasticClient *elasticsearch.Client) error {
+func DeletePost(title string, postID uuid.UUID) error {
 
 	contentUrl := constant.MAIN_PATH + "/" + title
 
@@ -136,7 +141,7 @@ func DeletePost(title, postID string, elasticClient *elasticsearch.Client) error
 	os.RemoveAll(contentUrl)
 
 	// 일라스틱서치에서 해당 게시글 삭제
-	err := elasticClient.DeletePost(postID)
+	err := db.DeletePost(postID)
 	if err != nil {
 		return err
 	}
@@ -148,10 +153,11 @@ func UpdatePost() {
 }
 
 type matter struct {
-	Title   string   `yaml:"title"`
-	Tags    []string `yaml:"Tags,omitempty"`
-	Content string   `yaml:"content,omitempty"`
-	Date    string   `yaml:"date,omitempty"`
+	Title    string   `yaml:"title"`
+	Tags     []string `yaml:"Tags,omitempty"`
+	Content  string   `yaml:"content,omitempty"`
+	Date     string   `yaml:"date,omitempty"`
+	Category string   `yaml:"category,omitempty"`
 }
 
 type frontendInfo struct {
@@ -159,39 +165,18 @@ type frontendInfo struct {
 	Matter matter `json:"matter"`
 }
 
-func readMDFileFromPosts(list []interface{}) ([]frontendInfo, error) {
+func readMDFileFromPosts(list []*ent.Post) ([]frontendInfo, error) {
 
 	var info []frontendInfo
 
 	for _, post := range list {
 
-		/*
-					post example ...
-					```
-					{
-			            "_id": "XNPy648B1fC73_ouFdqO",
-			            "_index": "new_kubesy",
-			            "_score": null,
-			            "_source": {
-			                "category": "test",
-			                "content": "/home/syyang/blog_data/test_json2",
-			                "date": "2024-06-06T14:07:42+09:00",
-			                "title": "test_json2"
-			            },
-			            "sort": [
-			                1717650462000
-			            ]
-			        },
-					```
-		*/
-
-		filePath := post.(map[string]interface{})["_source"].(map[string]interface{})["content"].(string)
-		title := post.(map[string]interface{})["_source"].(map[string]interface{})["title"].(string)
+		title := post.Title
 
 		// 작은따옴표 제거
-		filePath = strings.ReplaceAll(filePath, "'", "")
+		title = strings.ReplaceAll(title, "'", "")
 
-		contentUrl := constant.MAIN_PATH + filePath
+		contentUrl := constant.MAIN_PATH + "/" + title + "/" + title + ".md"
 
 		// Read the markdown file
 		content, err := os.ReadFile(contentUrl)
@@ -213,4 +198,44 @@ func readMDFileFromPosts(list []interface{}) ([]frontendInfo, error) {
 		})
 	}
 	return info, nil
+}
+
+func ReadMDFile(title string) (matter, error) {
+
+	contentUrl := constant.MAIN_PATH + "/" + title + "/" + title + ".md"
+
+	// Read the markdown file
+	content, err := os.ReadFile(contentUrl)
+	if err != nil {
+		fmt.Println(err)
+		return matter{}, err
+	}
+
+	var matter matter
+	_, err = frontmatter.Parse(strings.NewReader(string(content)), &matter)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	return matter, nil
+}
+
+func ConvertLocalFileToDatabaseStruct(matter matter, images []string) ent.Post {
+
+	// string to time.Time
+	time, err := time.Parse(time.RFC3339, matter.Date)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	post := ent.Post{
+		Title:    matter.Title,
+		Date:     time,
+		Content:  matter.Content,
+		Images:   images,
+		Category: matter.Category,
+		Tag:      matter.Tags,
+	}
+
+	return post
 }

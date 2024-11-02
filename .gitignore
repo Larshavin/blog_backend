@@ -3,3 +3,4 @@ nohup.out
 save_pid.txt
 blog-webserver*
 .env
+.env.production

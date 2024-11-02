@@ -6,7 +6,6 @@ ENV GO111MODULE=on \
     GOOS=linux \
     GOARCH=amd64
 
-#RUN mkdir -p /blog_data
 WORKDIR /build
 COPY . .
 RUN go mod download
@@ -15,9 +14,19 @@ RUN go build -o main .
 WORKDIR /dist
 RUN cp /build/main .
 
+# Copy .env files to the final stage
+COPY .env /dist/.env
+COPY .env.production /dist/.env.production
+
 FROM scratch
-#RUN mkdir -p /blog_data
+
+ENV GO_ENV=production 
+# GIN_MODE=release
+
 COPY --from=builder /dist/main .
+COPY --from=builder /dist/.env .env
+COPY --from=builder /dist/.env.production .env.production
+
 ENTRYPOINT ["/main"]
 
 

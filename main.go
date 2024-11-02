@@ -2,9 +2,17 @@ package main
 
 import (
 	constant "blog/constant"
-	elasticsearch "blog/elastic-search"
+	db "blog/database"
+	"blog/ent/migrate"
 	postPack "blog/post"
 	user "blog/user"
+	"context"
+	"net"
+
+	"blog/ent"
+
+	_ "github.com/lib/pq"
+
 	"fmt"
 	"log"
 	"net/http"
@@ -21,53 +29,87 @@ import (
 // 	SSLKEY string = "/etc/letsencrypt/live/3trolls.me/privkey.pem"
 // )
 
+func loadEnv() {
+	envFile := ".env"
+
+	fmt.Println("env : ", os.Getenv("GO_ENV"))
+
+	if os.Getenv("GO_ENV") == "production" {
+		envFile = ".env.production"
+	}
+
+	err := godotenv.Load(envFile)
+	if err != nil {
+		log.Fatalf("Error loading %s file: %v", envFile, err)
+	}
+}
+
 func main() {
 
-	// get parameter from .env file
-	var myEnv map[string]string
-	myEnv, err := godotenv.Read()
+	loadEnv()
+
+	constant.MAIN_PATH = os.Getenv("MAIN_DATA_PATH")
+	constant.PORT = os.Getenv("PORT")
+	constant.HASH_MIN = os.Getenv("HASH_MIN")
+	constant.HASH_MAX = os.Getenv("HASH_MAX")
+	constant.MODE = os.Getenv("MODE")
+
+	db.Vars = map[string]string{
+		"PG_HOST": os.Getenv("PG_HOST"),
+		"PG_PORT": os.Getenv("PG_PORT"),
+		"PG_USER": os.Getenv("PG_USER"),
+		"PG_DB":   os.Getenv("PG_DB"),
+		"PG_PASS": os.Getenv("PG_PASS"),
+	}
+
+	fmt.Println("mode : ", constant.MODE)
+
+	// database connection
+	postgresDSN := fmt.Sprintf("host=%s port=%s user=%s dbname=%s password=%s sslmode=disable",
+		db.Vars["PG_HOST"], db.Vars["PG_PORT"], db.Vars["PG_USER"], db.Vars["PG_DB"], db.Vars["PG_PASS"])
+
+	DBClient, err := ent.Open("postgres", postgresDSN)
 	if err != nil {
-		log.Fatal("Error loading .env file")
+		log.Fatalf("failed opening connection to postgres: %v", err)
+	}
+	defer DBClient.Close()
+	// Run the auto migration tool.
+	if err := DBClient.Schema.Create(context.Background(),
+		migrate.WithDropColumn(true),
+		migrate.WithDropIndex(true),
+	); err != nil {
+		log.Fatalf("failed creating schema resources: %v", err)
 	}
 
-	constant.MAIN_PATH = myEnv["MAIN_DATA_PATH"]
-	constant.PORT = myEnv["PORT"]
-	constant.HASH_MIN = myEnv["HASH_MIN"]
-	constant.HASH_MAX = myEnv["HASH_MAX"]
-	constant.MODE = myEnv["MODE"]
-
-	if myEnv["ELASTICSEARCH_TLS"] != "" {
-		constant.ELASTICSEARCH_TLS = myEnv["ELASTICSEARCH_TLS"]
-	} else if os.Getenv("ELASTICSEARCH_TLS") != "" {
-		constant.ELASTICSEARCH_TLS = os.Getenv("ELASTICSEARCH_TLS")
-	} else {
-		// program exit
-		log.Fatal("ELASTICSEARCH_TLS is not set")
+	// 실행 옵션에 --data-save option 을 넣어서 실행하면 로컬에 있는 파일을 데이터베이스에 저장합니다.
+	if len(os.Args) > 1 && os.Args[1] == "--data-save" {
+		err := CheckLocalPathFileWithDatabase(constant.MAIN_PATH)
+		if err != nil {
+			log.Fatalf("Error loading %s file: %v", constant.MAIN_PATH, err)
+		}
 	}
-
-	es := elasticsearch.Client{}
-	es.Connect(constant.MODE)
 
 	r := gin.Default()
 	r.Use(CORSMiddleware())
 
-	group := r.Group("/syyang")
+	r.Static("/syyang/image", constant.MAIN_PATH).Use(StaticCORSMiddleware())
+	r.Static("/syyang/markdown", constant.MAIN_PATH).Use(StaticCORSMiddleware())
 
-	group.Static("/image", constant.MAIN_PATH)
-	group.Static("/markdown", constant.MAIN_PATH)
+	group := r.Group("/syyang")
 
 	group.GET("/tmp/image/:id", tmpImageGetHandler())
 	group.POST("/tmp/image/:id", tmpImagePostHandler())
 	group.DELETE("/tmp/image/:id", tmpImageDeleteHandler())
 
-	group.GET("/posts/:number/:rows", listPostHandler(es))
-	group.POST("/post", savePostHandler(es))
-	group.DELETE("/post", deletePostHandler(es))
-	group.GET("/post/:path/:rows", getBlogPostHandler(es))
+	group.GET("/posts/:number/:rows", listPostHandler())
+	group.POST("/post", savePostHandler())
+	group.DELETE("/post", deletePostHandler())
+	group.GET("/post/:path/:rows", getBlogPostHandler())
 
-	group.POST("/login", postloginHandler(es))
+	group.POST("/login", postloginHandler())
 	// group.POST("/refresh", user.RefreshTokenHandler(es))
-	group.POST("/logout", postLogoutHandler(es))
+	group.POST("/logout", postLogoutHandler())
+	group.POST("/user", postUserHandler())
 
 	group.GET("/check", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "ok", "time": time.Now().Format("2006-01-02 15:04:05")})
@@ -77,28 +119,57 @@ func main() {
 	// r.RunTLS(":443", SSLCRT, SSLKEY)
 }
 
+func StaticCORSMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Access-Control-Allow-Origin", "*")
+		c.Next()
+	}
+}
+
+// 172.30.1.0/24 대역을 확인하는 함수
+func isAllowedIP(ip string) bool {
+	_, ipNet, _ := net.ParseCIDR("172.30.1.0/24")
+	parsedIP := net.ParseIP(ip)
+	return ipNet.Contains(parsedIP)
+}
+
 func CORSMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-
 		allowUrlList := []string{"https://blog.3trolls.me", "https://kubesy.com", "http://localhost:5174", "http://172.30.1.40:5174"}
+		requestOrigin := c.Request.Header.Get("Origin")
+		fmt.Println("requestOrigin:", requestOrigin)
 		var allowUrl string
-		for _, url := range allowUrlList {
-			if c.Request.Header.Get("Origin") == url {
-				allowUrl = url
-				break
+
+		// IP가 172.30.1.0/24 대역에 있는지 확인 : 개발용
+		clientIP := c.ClientIP()
+		if requestOrigin == "" {
+			if isAllowedIP(clientIP) {
+				allowUrl = clientIP
+			}
+		} else {
+			// 허용된 URL 목록에 있는 경우에만 허용
+			for _, url := range allowUrlList {
+				if requestOrigin == url {
+					allowUrl = url
+					break
+				}
 			}
 		}
 
-		c.Header("Access-Control-Allow-Origin", allowUrl)
-		c.Header("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")
-		c.Header("Access-Control-Allow-Credentials", "true")
-		c.Header("Access-Control-Allow-Headers", "Content-Type, Content-Length, Authorization, Origin, Accept, X-Requested-With")
+		if allowUrl != "" {
+			c.Header("Access-Control-Allow-Origin", allowUrl)
+			c.Header("Access-Control-Allow-Methods", "POST, OPTIONS, GET, PUT, DELETE")
+			c.Header("Access-Control-Allow-Credentials", "true")
+			c.Header("Access-Control-Allow-Headers", "Content-Type, Content-Length, Authorization, Origin, Accept, X-Requested-With")
 
-		if c.Request.Method == "OPTIONS" {
-			c.AbortWithStatus(204)
+			if c.Request.Method == "OPTIONS" {
+				c.AbortWithStatus(http.StatusNoContent)
+				return
+			}
+		} else {
+			c.AbortWithStatus(http.StatusForbidden)
 			return
 		}
-
 		c.Next()
 	}
 }
@@ -148,9 +219,7 @@ func tmpImageDeleteHandler() gin.HandlerFunc {
 	}
 }
 
-/* */
-
-func listPostHandler(es elasticsearch.Client) gin.HandlerFunc {
+func listPostHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 
 		rows, err := strconv.Atoi(c.Params.ByName("rows"))
@@ -164,12 +233,12 @@ func listPostHandler(es elasticsearch.Client) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		}
 
-		length, err := es.CountAllPosts()
+		length, err := db.CountAllPosts()
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		}
 
-		posts, err := postPack.GetPost(rows, paginatorNumber, &es)
+		posts, err := postPack.GetPost(rows, paginatorNumber)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		}
@@ -178,7 +247,7 @@ func listPostHandler(es elasticsearch.Client) gin.HandlerFunc {
 	}
 }
 
-func savePostHandler(es elasticsearch.Client) gin.HandlerFunc {
+func savePostHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var frontData postPack.FrontData
 		err := c.BindJSON(&frontData)
@@ -186,7 +255,7 @@ func savePostHandler(es elasticsearch.Client) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		}
 
-		err = postPack.SavePost(frontData, &es)
+		err = postPack.SavePost(frontData)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		}
@@ -194,7 +263,7 @@ func savePostHandler(es elasticsearch.Client) gin.HandlerFunc {
 	}
 }
 
-func deletePostHandler(es elasticsearch.Client) gin.HandlerFunc {
+func deletePostHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var frontData postPack.FrontData
 		err := c.BindJSON(&frontData)
@@ -202,7 +271,7 @@ func deletePostHandler(es elasticsearch.Client) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		}
 
-		err = postPack.DeletePost(frontData.Title, frontData.ID, &es)
+		err = postPack.DeletePost(frontData.Title, frontData.ID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		}
@@ -210,7 +279,7 @@ func deletePostHandler(es elasticsearch.Client) gin.HandlerFunc {
 	}
 }
 
-func getBlogPostHandler(es elasticsearch.Client) gin.HandlerFunc {
+func getBlogPostHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		rows, err := strconv.Atoi(c.Params.ByName("rows"))
 		if err != nil {
@@ -218,10 +287,10 @@ func getBlogPostHandler(es elasticsearch.Client) gin.HandlerFunc {
 		}
 		title := c.Params.ByName("path")
 
-		var prev, next elasticsearch.AdjacentPost
+		var prev, next db.AdjacentPost
 		var i int
 
-		prev, next, i, err = es.GetPrevNextPost(title, rows)
+		prev, next, i, err = db.GetPrevNextPost(title, rows)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		}
@@ -229,21 +298,27 @@ func getBlogPostHandler(es elasticsearch.Client) gin.HandlerFunc {
 	}
 }
 
-func postloginHandler(es elasticsearch.Client) gin.HandlerFunc {
+func postloginHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 
-		var loginData elasticsearch.User
+		var loginData user.LoginData
 		err := c.BindJSON(&loginData)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		}
 
-		userInfo, err := user.CheckPassword(loginData.Email, loginData.Password, es)
+		userInfo, err := user.CheckPassword(loginData.Email, loginData.Password)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		}
 
-		accessToken, refreshToken, err := user.GenerateToken(userInfo, es)
+		accessToken, refreshToken, err := user.GenerateToken(*userInfo)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+
+		// save tokens to db
+		err = db.SaveToken(userInfo.Email, accessToken, refreshToken)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		}
@@ -255,7 +330,7 @@ func postloginHandler(es elasticsearch.Client) gin.HandlerFunc {
 	}
 }
 
-func postLogoutHandler(es elasticsearch.Client) gin.HandlerFunc {
+func postLogoutHandler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 
 		type dataType struct {
@@ -269,20 +344,100 @@ func postLogoutHandler(es elasticsearch.Client) gin.HandlerFunc {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		}
 
-		data, err := user.DecodeToken(json.AccessToken)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		}
-
-		userEmail := data.Email
-
-		// delete two tokens from elastic search
-
-		err = es.DeleteToken(userEmail)
+		err = db.DeleteTokenByAccessToken(json.AccessToken)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		}
 
 		c.JSON(http.StatusOK, gin.H{"message": "logout success"})
+	}
+}
+
+func CheckLocalPathFileWithDatabase(path string) error {
+
+	// check if the file exists in the database
+	// path example: ~/blog_data, get list of directory in the path
+	blogPostListInLocalPath := []string{}
+	files, err := os.ReadDir(path)
+	if err != nil {
+		return err
+	}
+	// 디렉토리만 출력합니다.
+	for _, file := range files {
+		// 폴더가 아니거나 .git 폴더는 제외합니다.
+		if file.IsDir() && file.Name() != ".git" && file.Name() != "test" {
+			fmt.Println("Directory:", file.Name())
+			blogPostListInLocalPath = append(blogPostListInLocalPath, file.Name())
+		}
+	}
+
+	fmt.Println("blogPostListInLocalPath:", blogPostListInLocalPath)
+
+	for _, blogPostTitle := range blogPostListInLocalPath {
+		if !db.CheckPostListInDatabase(blogPostTitle) {
+			// save the file to the database
+			matter, err := postPack.ReadMDFile(blogPostTitle)
+			if err != nil {
+				return err
+			}
+			images, err := findImagesInLocalPost(blogPostTitle)
+			if err != nil {
+				return err
+			}
+
+			fmt.Println("matter:", matter, "images:", images)
+
+			post := postPack.ConvertLocalFileToDatabaseStruct(matter, images)
+
+			fmt.Println("post:", post)
+
+			err = db.SavePost(post)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func findImagesInLocalPost(blogPostTitle string) ([]string, error) {
+	// find images in the local post
+	images := []string{}
+	path := fmt.Sprintf("%s/%s/images", constant.MAIN_PATH, blogPostTitle)
+	files, err := os.ReadDir(path)
+	if err != nil {
+		return images, err
+	}
+	for _, file := range files {
+		if !file.IsDir() {
+			images = append(images, file.Name())
+		}
+	}
+	return images, nil
+}
+
+func postUserHandler() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var frontData ent.User
+		err := c.BindJSON(&frontData)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+
+		// hash password
+		frontData.HashedPassword, err = user.HashPassword(frontData.HashedPassword)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+
+		// user role
+		frontData.Role = "visitor"
+
+		err = db.SaveUser(&frontData)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		}
+		c.JSON(http.StatusOK, gin.H{"message": "ok"})
 	}
 }
