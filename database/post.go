@@ -29,6 +29,47 @@ func CountAllPosts() (int, error) {
 }
 
 func GetPrevNextPost(title string, rows int) (AdjacentPost, AdjacentPost, int, error) {
+
+	client := connection()
+	defer client.Close()
+	ctx := context.Background()
+
+	// get the list of posts
+	posts, err := client.Post.Query().Order(ent.Desc(post.FieldDate)).All(ctx)
+	if err != nil {
+		return AdjacentPost{}, AdjacentPost{}, 0, err
+	}
+
+	// find the index of the post
+	var i int
+	for i = 0; i < len(posts); i++ {
+		if posts[i].Title == title {
+			break
+		}
+	}
+
+	// find the previous and next post
+	if i > 0 {
+		prev := AdjacentPost{
+			Title:           posts[i-1].Title,
+			PaginatorNumber: (i - 1) / rows,
+		}
+		if i < len(posts)-1 {
+			next := AdjacentPost{
+				Title:           posts[i+1].Title,
+				PaginatorNumber: (i + 1) / rows,
+			}
+			return prev, next, i, nil
+		}
+		return prev, AdjacentPost{}, i, nil
+	} else if i < len(posts)-1 {
+		next := AdjacentPost{
+			Title:           posts[i+1].Title,
+			PaginatorNumber: (i + 1) / rows,
+		}
+		return AdjacentPost{}, next, i, nil
+	}
+
 	return AdjacentPost{}, AdjacentPost{}, 0, nil
 }
 

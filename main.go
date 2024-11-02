@@ -4,8 +4,8 @@ import (
 	constant "blog/constant"
 	db "blog/database"
 	"blog/ent/migrate"
+	h "blog/handler"
 	postPack "blog/post"
-	user "blog/user"
 	"context"
 	"net"
 
@@ -17,7 +17,6 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -97,19 +96,22 @@ func main() {
 
 	group := r.Group("/syyang")
 
-	group.GET("/tmp/image/:id", tmpImageGetHandler())
-	group.POST("/tmp/image/:id", tmpImagePostHandler())
-	group.DELETE("/tmp/image/:id", tmpImageDeleteHandler())
+	group.GET("/tmp/image/:id", h.TempImageGetHandler())
+	group.POST("/tmp/image/:id", h.TempImagePostHandler())
+	group.DELETE("/tmp/image/:id", h.TempImageDeleteHandler())
 
-	group.GET("/posts/:number/:rows", listPostHandler())
-	group.POST("/post", savePostHandler())
-	group.DELETE("/post", deletePostHandler())
-	group.GET("/post/:path/:rows", getBlogPostHandler())
+	group.GET("/posts/:number/:rows", h.ListPostHandler())
+	group.POST("/post", h.SavePostHandler())
+	group.DELETE("/post", h.DeletePostHandler())
+	group.GET("/post/:path/:rows", h.GetBlogPostHandler())
 
-	group.POST("/login", postloginHandler())
+	group.GET("/tag", h.GetTagsHandler())
+	group.GET("/tag/:tag", h.GetTagHandler())
+
+	group.POST("/login", h.PostloginHandler())
 	// group.POST("/refresh", user.RefreshTokenHandler(es))
-	group.POST("/logout", postLogoutHandler())
-	group.POST("/user", postUserHandler())
+	group.POST("/logout", h.PostLogoutHandler())
+	group.POST("/user", h.PostUserHandler())
 
 	group.GET("/check", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "ok", "time": time.Now().Format("2006-01-02 15:04:05")})
@@ -171,185 +173,6 @@ func CORSMiddleware() gin.HandlerFunc {
 			return
 		}
 		c.Next()
-	}
-}
-
-func tmpImageGetHandler() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		id := c.Params.ByName("id")
-		tmpPath := fmt.Sprintf("%s/%s", constant.MAIN_PATH, id)
-		err := os.MkdirAll(tmpPath, 0755)
-		if err != nil {
-			fmt.Println(err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		}
-		c.JSON(http.StatusOK, gin.H{"path": tmpPath})
-	}
-}
-
-func tmpImagePostHandler() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		file, err := c.FormFile("image")
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "No file is received"})
-			return
-		}
-
-		id := c.Params.ByName("id")
-		tmpPath := fmt.Sprintf("%s/%s", constant.MAIN_PATH, id)
-		fileName := fmt.Sprintf("%s/%s", tmpPath, file.Filename)
-		if err := c.SaveUploadedFile(file, fileName); err != nil {
-			fmt.Println(err)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		}
-
-		c.JSON(http.StatusOK, gin.H{"message": "ok", "path": id + "/" + file.Filename, "size": file.Size, "name": file.Filename})
-	}
-}
-
-func tmpImageDeleteHandler() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		id := c.Params.ByName("id")
-		tmpPath := fmt.Sprintf("%s/%s", constant.MAIN_PATH, id)
-		err := os.RemoveAll(tmpPath)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		}
-		c.JSON(http.StatusOK, gin.H{"message": "ok"})
-	}
-}
-
-func listPostHandler() gin.HandlerFunc {
-	return func(c *gin.Context) {
-
-		rows, err := strconv.Atoi(c.Params.ByName("rows"))
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		}
-
-		number := c.Params.ByName("number")
-		paginatorNumber, err := strconv.Atoi(number)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		}
-
-		length, err := db.CountAllPosts()
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		}
-
-		posts, err := postPack.GetPost(rows, paginatorNumber)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		}
-
-		c.JSON(http.StatusOK, gin.H{"posts": posts, "length": length})
-	}
-}
-
-func savePostHandler() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		var frontData postPack.FrontData
-		err := c.BindJSON(&frontData)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		}
-
-		err = postPack.SavePost(frontData)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		}
-		c.JSON(http.StatusOK, gin.H{"message": "ok"})
-	}
-}
-
-func deletePostHandler() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		var frontData postPack.FrontData
-		err := c.BindJSON(&frontData)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		}
-
-		err = postPack.DeletePost(frontData.Title, frontData.ID)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		}
-		c.JSON(http.StatusOK, gin.H{"message": "ok"})
-	}
-}
-
-func getBlogPostHandler() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		rows, err := strconv.Atoi(c.Params.ByName("rows"))
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		}
-		title := c.Params.ByName("path")
-
-		var prev, next db.AdjacentPost
-		var i int
-
-		prev, next, i, err = db.GetPrevNextPost(title, rows)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		}
-		c.JSON(http.StatusOK, gin.H{"number": i / rows, "prev": prev, "next": next})
-	}
-}
-
-func postloginHandler() gin.HandlerFunc {
-	return func(c *gin.Context) {
-
-		var loginData user.LoginData
-		err := c.BindJSON(&loginData)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		}
-
-		userInfo, err := user.CheckPassword(loginData.Email, loginData.Password)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		}
-
-		accessToken, refreshToken, err := user.GenerateToken(*userInfo)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		}
-
-		// save tokens to db
-		err = db.SaveToken(userInfo.Email, accessToken, refreshToken)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		}
-
-		// marshal data
-		data := gin.H{"accessToken": accessToken, "refreshToken": refreshToken}
-
-		c.JSON(http.StatusOK, data)
-	}
-}
-
-func postLogoutHandler() gin.HandlerFunc {
-	return func(c *gin.Context) {
-
-		type dataType struct {
-			AccessToken string `json:"accessToken"`
-		}
-		var json dataType
-
-		// decode token and get email
-		err := c.BindJSON(&json)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		}
-
-		err = db.DeleteTokenByAccessToken(json.AccessToken)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		}
-
-		c.JSON(http.StatusOK, gin.H{"message": "logout success"})
 	}
 }
 
@@ -415,29 +238,4 @@ func findImagesInLocalPost(blogPostTitle string) ([]string, error) {
 		}
 	}
 	return images, nil
-}
-
-func postUserHandler() gin.HandlerFunc {
-	return func(c *gin.Context) {
-		var frontData ent.User
-		err := c.BindJSON(&frontData)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		}
-
-		// hash password
-		frontData.HashedPassword, err = user.HashPassword(frontData.HashedPassword)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		}
-
-		// user role
-		frontData.Role = "visitor"
-
-		err = db.SaveUser(&frontData)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-		}
-		c.JSON(http.StatusOK, gin.H{"message": "ok"})
-	}
 }

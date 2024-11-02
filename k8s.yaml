@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: blog-deployment
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: blog
+  template:
+    metadata:
+      labels:
+        app: blog
+    spec:
+      imagePullSecrets:
+        - name: harbor-registry-secret
+      volumes:
+        - name: blog-data
+          persistentVolumeClaim:
+            claimName: blog-data
+      containers:
+        - name: blog
+          image: harbor.3trolls.me/blog/backend:v0.0.1
+          ports:
+            - containerPort: 8080
+          env:
+            - name: GO_ENV
+              value: "production"
+            - name: GIN_MODE
+              value: "release"
+          volumeMounts:
+            - name: blog-data
+              mountPath: /blog_data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: blog-service
+spec:
+  selector:
+    app: blog
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 8080
+      nodePort: 30010
+  type: NodePort
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: blog-data
+  namespace: default
+  labels:
+    app: blog-data
+spec:
+  storageClassName: nfs-client
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 30Gi
