@@ -3,7 +3,7 @@ kind: Deployment
 metadata:
   name: blog-deployment
 spec:
-  replicas: 3
+  replicas: 1
   selector:
     matchLabels:
       app: blog
@@ -21,6 +21,7 @@ spec:
       containers:
         - name: blog
           image: harbor.3trolls.me/blog/backend:v0.0.1
+          imagePullPolicy: Always
           ports:
             - containerPort: 8080
           env:

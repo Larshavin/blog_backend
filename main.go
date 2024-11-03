@@ -52,6 +52,7 @@ func main() {
 	constant.HASH_MIN = os.Getenv("HASH_MIN")
 	constant.HASH_MAX = os.Getenv("HASH_MAX")
 	constant.MODE = os.Getenv("MODE")
+	constant.BUILD_TIME = time.Now().Format("2006-01-02 15:04:05")
 
 	db.Vars = map[string]string{
 		"PG_HOST": os.Getenv("PG_HOST"),
@@ -96,6 +97,9 @@ func main() {
 
 	group := r.Group("/syyang")
 
+	// group.Static("/syyang/image", constant.MAIN_PATH)
+	// group.Static("/syyang/markdown", constant.MAIN_PATH)
+
 	group.GET("/tmp/image/:id", h.TempImageGetHandler())
 	group.POST("/tmp/image/:id", h.TempImagePostHandler())
 	group.DELETE("/tmp/image/:id", h.TempImageDeleteHandler())
@@ -114,7 +118,7 @@ func main() {
 	group.POST("/user", h.PostUserHandler())
 
 	group.GET("/check", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{"message": "ok", "time": time.Now().Format("2006-01-02 15:04:05")})
+		c.JSON(http.StatusOK, gin.H{"message": "ok", "time": time.Now().Format("2006-01-02 15:04:05"), "build_time": constant.BUILD_TIME})
 	})
 
 	r.Run("0.0.0.0:" + constant.PORT) // listen and serve on 0.0.0.0:8080 (for windows "localhost:8080")
@@ -123,7 +127,19 @@ func main() {
 
 func StaticCORSMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		c.Header("Access-Control-Allow-Origin", "*")
+		origin := c.Request.Header.Get("Origin")
+		if origin == "" {
+			origin = "*" // 기본값으로 모든 도메인 허용
+		}
+		c.Header("Access-Control-Allow-Origin", origin)
+		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Accept, Authorization")
+
+		if c.Request.Method == "OPTIONS" {
+			c.AbortWithStatus(200)
+			return
+		}
+
 		c.Next()
 	}
 }
@@ -139,15 +155,15 @@ func CORSMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		allowUrlList := []string{"https://blog.3trolls.me", "https://kubesy.com", "http://localhost:5174", "http://172.30.1.40:5174"}
 		requestOrigin := c.Request.Header.Get("Origin")
-		fmt.Println("requestOrigin:", requestOrigin)
 		var allowUrl string
 
 		// IP가 172.30.1.0/24 대역에 있는지 확인 : 개발용
-		clientIP := c.ClientIP()
+		// clientIP := c.ClientIP()
 		if requestOrigin == "" {
-			if isAllowedIP(clientIP) {
-				allowUrl = clientIP
-			}
+			// if isAllowedIP(clientIP) {
+			// 	allowUrl = clientIP
+			// }
+			allowUrl = "*"
 		} else {
 			// 허용된 URL 목록에 있는 경우에만 허용
 			for _, url := range allowUrlList {
